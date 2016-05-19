@@ -14,8 +14,12 @@ import (
 	"time"
 )
 
-var sk string = "xx"
-var ak string = "yy"
+type KeyPair struct {
+	Ak string `json:"ak"`
+	Sk string `json:"sk"`
+}
+
+var keyPair KeyPair
 
 type PfopId struct {
 	PersistentId string `json:"persistentId"`
@@ -41,14 +45,24 @@ type PfopStatus struct {
 	Items       []PfopItem `json:"items"`
 }
 
+func init() {
+	bytes, err := ioutil.ReadFile("key.json")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	json.Unmarshal(bytes, &keyPair)
+	fmt.Println(keyPair)
+}
+
 func getPfopToken(path string, body string) (token string) {
-	key := []byte(sk)
+	key := []byte(keyPair.Sk)
 	mac := hmac.New(sha1.New, key)
 	mac.Write([]byte(path + "\n" + body))
 	//fmt.Printf("%x\n", mac.Sum(nil))
 	b64 := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	//fmt.Println(b64)
-	token = ak + ":" + b64
+	token = keyPair.Ak + ":" + b64
 	fmt.Println(" body:", body)
 	fmt.Println("token:", token)
 	return
@@ -65,7 +79,7 @@ func post(url string, postStr string) []byte {
 	req.Header.Set("Host", "api.qiniu.com")
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	//http://developer.qiniu.com/article/developer/security/access-token.html
-	req.Header.Add("Authorization", "QBox "+getPfopToken("/pfop/", postStr))
+	req.Header.Add("Authorization", " QBox "+getPfopToken("/pfop/", postStr))
 
 	resp, err := client.Do(req)
 
