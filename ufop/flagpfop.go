@@ -6,30 +6,35 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	//	"net/url"
-	"flag"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
 )
 
-var sk string = "xx"
-var ak string = "xx"
+type KeyPair struct {
+	Ak string `json:"ak"`
+	Sk string `json:"sk"`
+}
+
+var keyPair KeyPair
 
 type PfopId struct {
 	PersistentId string `json:"persistentId"`
 	Error        string `json:"error"`
 }
 type CmdArgs struct {
-	Mp4file  *string
-	Queue    *string
-	Start    *int
-	End      *int
-	Interval *int
-	Times    *int
+	Mp4file   *string
+	Queue     *string
+	Start     *int
+	End       *int
+	Interval  *int
+	Times     *int
+	Urlencode *int
 }
 type PfopItem struct {
 	cmd       string `json:"id"`
@@ -51,14 +56,23 @@ type PfopStatus struct {
 	Items       []PfopItem `json:"items"`
 }
 
+func init() {
+	bytes, err := ioutil.ReadFile("key.json")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	json.Unmarshal(bytes, &keyPair)
+	fmt.Println(keyPair)
+}
 func getPfopToken(path string, body string) (token string) {
-	key := []byte(sk)
+	key := []byte(keyPair.Sk)
 	mac := hmac.New(sha1.New, key)
 	mac.Write([]byte(path + "\n" + body))
 	//fmt.Printf("%x\n", mac.Sum(nil))
 	b64 := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	//fmt.Println(b64)
-	token = ak + ":" + b64
+	token = keyPair.Ak + ":" + b64
 	fmt.Println(" body:", body)
 	fmt.Println("token:", token)
 	return
@@ -73,10 +87,10 @@ func post(url string, postStr string) []byte {
 	req, _ := http.NewRequest("POST", url, postBytesReader)
 
 	req.Header.Set("Host", "api.qiniu.com")
-	req.Header.Set("User-Agent", "QiniuJava/7.0.7 (Windows 7 amd64 6.1) Java 1.8.0_91")
+	//req.Header.Set("User-Agent", "QiniuJava/7.0.7 (Windows 7 amd64 6.1) Java 1.8.0_91")
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	//http://developer.qiniu.com/article/developer/security/access-token.html
-	req.Header.Add("Authorization", "QBox "+getPfopToken("/pfop/", postStr))
+	req.Header.Add("Authorization", " QBox "+getPfopToken("/pfop/", postStr))
 	req.Header.Add("Connection", "Keep-Alive")
 
 	resp, err := client.Do(req)
@@ -96,19 +110,26 @@ func post(url string, postStr string) []byte {
 	//fmt.Println(string(body))
 	return body
 }
-func preparePost(a *CmdArgs) (res *PfopId) {
-	//urlStr := "bucket=hikvision&force=1&fops=hkconv/bucket/aGlrdmlzaW9u/key/" + base64.StdEncoding.EncodeToString([]byte(os.Args[1])) + "/start/" + os.Args[2] + "/end/" + os.Args[3] + "&key=2016-04-18.avi"
-	//urlenc := url.QueryEscape(urlStr)
-	//b := post("http://api.qiniu.com/pfop/", urlenc)
-
-	//pfop只转义了/,所以不调用url.QueryEscape，调用会发生奇怪的错误，比如token
-	//有时对有时错，并且有些时候参数有问题
-	urlStr := "bucket=hikvision&force=1&fops=hkconv%2Fbucket%2FaGlrdmlzaW9u%2Fkey%2F" + base64.StdEncoding.EncodeToString([]byte(*a.Mp4file)) + "%2Fstart%2F" + strconv.Itoa(*a.Start) + "%2Fend%2F" + strconv.Itoa(*a.End) + "&key=2016-04-18.avi"
-	if *a.Queue != "" {
-		urlStr = "pipeline=" + (*a.Queue) + "&" + urlStr
+func preparePost(a *CmdArgs, useUrlencode int) (res *PfopId) {
+	var b []byte
+	if useUrlencode == 0 {
+		//pfop只转义了/,所以不调用url.QueryEscape，调用会发生奇怪的错误，比如token
+		//有时对有时错，并且有些时候参数有问题
+		urlStr := "bucket=hikvision&force=1&fops=hkconv%2Fbucket%2FaGlrdmlzaW9u%2Fkey%2F" + base64.StdEncoding.EncodeToString([]byte(*a.Mp4file)) + "%2Fstart%2F" + strconv.Itoa(*a.Start) + "%2Fend%2F" + strconv.Itoa(*a.End) + "&key=2016-04-18.avi"
+		if *a.Queue != "" {
+			urlStr = "pipeline=" + (*a.Queue) + "&" + urlStr
+		}
+		fmt.Println(urlStr)
+		b = post("http://api.qiniu.com/pfop/", urlStr)
+	} else {
+		urlStr := "bucket=hikvision&force=1&fops=hkconv/bucket/aGlrdmlzaW9u/key/" + base64.StdEncoding.EncodeToString([]byte(*a.Mp4file)) + "/start/" + strconv.Itoa(*a.Start) + "/end/" + strconv.Itoa(*a.End) + "&key=2016-04-18.avi"
+		if *a.Queue != "" {
+			urlStr = "pipeline=" + (*a.Queue) + "&" + urlStr
+		}
+		fmt.Println(urlStr)
+		urlenc := url.QueryEscape(urlStr)
+		b = post("http://api.qiniu.com/pfop/", urlenc)
 	}
-	fmt.Println(urlStr)
-	b := post("http://api.qiniu.com/pfop/", urlStr)
 
 	var fop PfopId
 	fmt.Println(string(b))
@@ -151,6 +172,7 @@ func initArg(a *CmdArgs) {
 	a.Mp4file = flag.String("fname", "", "output mp4 file name")
 	a.Interval = flag.Int("interval", 0, "querty PersistentId interval. 0 mean not querty")
 	a.Times = flag.Int("times", 0, "querty PersistentId times")
+	a.Urlencode = flag.Int("urlencode", 0, "defualt, just encode /")
 	flag.Parse()
 	fmt.Println("end     :", *a.End)
 	fmt.Println("start   :", *a.Start)
@@ -158,6 +180,7 @@ func initArg(a *CmdArgs) {
 	fmt.Println("times   :", *a.Times)
 	fmt.Println("queue   :", *a.Queue)
 	fmt.Println("mp4file :", *a.Mp4file)
+	fmt.Println("urlenc  :", *a.Urlencode)
 }
 func checkArg(a *CmdArgs) {
 	if *a.End < *a.Start {
@@ -180,7 +203,7 @@ func main() {
 	initArg(&arg)
 	checkArg(&arg)
 
-	id := preparePost(&arg)
+	id := preparePost(&arg, *arg.Urlencode)
 	if id == nil {
 		fmt.Println("preparePost fail")
 		return
