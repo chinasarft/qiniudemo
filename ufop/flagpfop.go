@@ -35,6 +35,9 @@ type CmdArgs struct {
 	Interval  *int
 	Times     *int
 	Urlencode *int
+	TokenOnly *int
+	Body      *string
+	Path      *string
 }
 type PfopItem struct {
 	cmd       string `json:"id"`
@@ -65,13 +68,17 @@ func init() {
 	json.Unmarshal(bytes, &keyPair)
 	fmt.Println(keyPair)
 }
+
+//token的生成
+//http://developer.qiniu.com/article/developer/security/access-token.html
 func getPfopToken(path string, body string) (token string) {
+	fmt.Println("path:", path)
 	key := []byte(keyPair.Sk)
 	mac := hmac.New(sha1.New, key)
 	mac.Write([]byte(path + "\n" + body))
-	//fmt.Printf("%x\n", mac.Sum(nil))
+	fmt.Printf("%x\n", mac.Sum(nil))
 	b64 := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	//fmt.Println(b64)
+	fmt.Println(b64)
 	token = keyPair.Ak + ":" + b64
 	fmt.Println(" body:", body)
 	fmt.Println("token:", token)
@@ -86,12 +93,12 @@ func post(url string, postStr string) []byte {
 	postBytesReader := bytes.NewReader([]byte(postStr))
 	req, _ := http.NewRequest("POST", url, postBytesReader)
 
+	req.Header.Add("Authorization", "QBox "+getPfopToken("/pfop/", postStr))
 	req.Header.Set("Host", "api.qiniu.com")
-	//req.Header.Set("User-Agent", "QiniuJava/7.0.7 (Windows 7 amd64 6.1) Java 1.8.0_91")
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	//http://developer.qiniu.com/article/developer/security/access-token.html
-	req.Header.Add("Authorization", " QBox "+getPfopToken("/pfop/", postStr))
-	req.Header.Add("Connection", "Keep-Alive")
+	//req.Header.Set("User-Agent", "QiniuJava/7.0.7 (Windows 7 amd64 6.1) Java 1.8.0_91")
+
+	//req.Header.Add("Connection", "Keep-Alive")
 
 	resp, err := client.Do(req)
 
@@ -173,6 +180,14 @@ func initArg(a *CmdArgs) {
 	a.Interval = flag.Int("interval", 0, "querty PersistentId interval. 0 mean not querty")
 	a.Times = flag.Int("times", 0, "querty PersistentId times")
 	a.Urlencode = flag.Int("urlencode", 0, "defualt, just encode /")
+	a.TokenOnly = flag.Int("tokenonly", 0, "just calculate token")
+	a.Body = flag.String("body", "", "use this to calculate token")
+	a.Path = flag.String("path", "", `use this to calculate token.
+	sample:
+	  path value:/move/bmV3ZG9jczpmaW5kX21hbi50eHQ=/bmV3ZG9jczpmaW5kLm1hbi50eHQ=
+	  ak: MY_ACCESS_KEY sk:MY_SECRET_KEY
+	  result:MY_ACCESS_KEY:FXsYh0wKHYPEsIAgdPD9OfjkeEM=
+	`)
 	flag.Parse()
 	fmt.Println("end     :", *a.End)
 	fmt.Println("start   :", *a.Start)
@@ -181,8 +196,16 @@ func initArg(a *CmdArgs) {
 	fmt.Println("queue   :", *a.Queue)
 	fmt.Println("mp4file :", *a.Mp4file)
 	fmt.Println("urlenc  :", *a.Urlencode)
+	fmt.Println("path    :", *a.Path)
 }
 func checkArg(a *CmdArgs) {
+	if *a.TokenOnly != 0 {
+		if *a.Path == "" {
+			fmt.Println("must give path value")
+			os.Exit(1)
+		}
+		return
+	}
 	if *a.End < *a.Start {
 		fmt.Println("wrong start end")
 		os.Exit(2)
@@ -195,13 +218,13 @@ func checkArg(a *CmdArgs) {
 }
 func main() {
 	//post("http://api.qiniu.com/pfop/", "pipeline=jjj&bucket=hikvision&force=1&fops=hkconv%2Fbucket%2FaGlrdmlzaW9uYQ%3D%3D%2Fkey%2FaGlraW5nMTA0ODU3Ni5tcDQ%3D%2Fstart%2F1048576%2Fend%2F2379776&key=2016-04-18.avi")
-	/*if len(os.Args) < 7 {
-		fmt.Println("usage as:", os.Args[0], " mp4name startoffset endoffset [queue] ")
-		return
-	}*/
 	var arg CmdArgs
 	initArg(&arg)
 	checkArg(&arg)
+	if *arg.TokenOnly != 0 {
+		getPfopToken(*arg.Path, *arg.Body)
+		return
+	}
 
 	id := preparePost(&arg, *arg.Urlencode)
 	if id == nil {
