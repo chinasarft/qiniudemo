@@ -11,6 +11,7 @@ import (
 	context "golang.org/x/net/context"
 	kodo "qiniupkg.com/api.v7/kodo"
 )
+
 type KeyPair struct {
 	Ak string `json:"ak"`
 	Sk string `json:"sk"`
@@ -18,15 +19,19 @@ type KeyPair struct {
 
 var keyPair KeyPair
 
+//用hkconv这个ufop把key=2016-04-18.avi文件的start到end转为mp4放到bucket/aGlrdmlzaW9u/key/MjAxNjA5MDgxMDQwLm1wNA==
+//bucket=hikvision&key=2016-04-18.avi&force=1&fops=hkconv/bucket/aGlrdmlzaW9u/key/MjAxNjA5MDgxMDQwLm1wNA==/start/10000/end/80000
+//如果pfop以如上方式发起
+//force这个参数是不会传递到ufop的
 type ReqArgs struct {
-	Cmd  string `json:"cmd"`
-	Mode uint32 `json:"mode"`
+	Cmd  string `json:"cmd"`  //就是fops=的内容
+	Mode uint32 `json:"mode"` //标志是否为异步,ufop里几乎也不用理这个字段
 	Src  struct {
-		Url      string `json:"url"`
-		Mimetype string `json:"mimetype"`
-		Fsize    int32  `json:"fsize"`
-		Bucket   string `json:"bucket"`
-		Key      string `json:"key"`
+		Url      string `json:"url"`      //自动把bucket=hikvision&key=2016-04-18.avi这个转为一个http的url地址
+		Mimetype string `json:"mimetype"` //key=2016-04-18.avi文件的类型
+		Fsize    int32  `json:"fsize"`    //key=2016-04-18.avi这个文件的大小
+		Bucket   string `json:"bucket"`   //bucket=hikvision
+		Key      string `json:"key"`      //key=2016-04-18.avi
 	} `json: "src"`
 }
 
@@ -38,7 +43,7 @@ func init() {
 	}
 	json.Unmarshal(bytes, &keyPair)
 	fmt.Println(keyPair)
-         kodo.SetMac(keyPair.Ak, keyPair.Sk)
+	kodo.SetMac(keyPair.Ak, keyPair.Sk)
 }
 
 func serverUpload() {
