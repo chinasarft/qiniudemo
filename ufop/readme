@@ -1,0 +1,7 @@
+fops=hkcontest%2Fbucket%2aGlrdmlzaW9u%2Fkey%2FMjAxNjA5MDgxMDQwLm1wNA==%2Fstart%2F10000%2Fend%2F80000&
+
+hk转码的程序因为自己定义了fops=参数里面的格式，bucket和key是base64编码了的，所以需要base64编码在传入
+ ./pfopv2  -bucket hikvision -key 2016-04-18.avi -fops "hkcontest/bucket/aGlrdmlzaW9u/key/MjAxNjA5MDgxNDA4Lm1wNAo=/start/10000/end/800000"
+ ./pfopv2 -printBody -bucket hikvision -key 2016-04-18.avi -fops "hkcontest/bucket/aGlrdmlzaW9u/key/MjAxNjA5MDgxNDA4Lm1wNAo=/start/10000/end/800000"
+ ./pfopv2 -printBody -urlencode=false -bucket hikvision -key 2016-04-18.avi -fops "hkcontest/bucket/aGlrdmlzaW9u/key/MjAxNjA5MDgxNDA4Lm1wNAo=/start/10000/end/800000"
+

@@ -7,12 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -28,20 +27,26 @@ type PfopId struct {
 	Error        string `json:"error"`
 }
 type CmdArgs struct {
-	Mp4file   *string
-	Queue     *string
-	Start     *int
-	End       *int
-	Interval  *int
-	Times     *int
-	Urlencode *int
-	TokenOnly *int
-	Body      *string
-	Path      *string
+	Bucket    string
+	Key       string
+	Force     string
+	Fops      string
+	NotifyURL string
+	Pipeline  string
+
+	PrintBody bool
+	Urlencode bool
+
+	Interval int
+	Times    int
+
+	TokenOnly bool
+	Body      string
+	Path      string
 }
 type PfopItem struct {
-	cmd       string `json:"id"`
-	code      int    `json:"code"`
+	Cmd       string `json:"id"`
+	Code      int    `json:"code"`
 	Desc      string `json:"desc"`
 	Error     string `json:"error"`
 	Hash      string `json:"hash"`
@@ -50,7 +55,7 @@ type PfopItem struct {
 }
 type PfopStatus struct {
 	Id          string     `json:"id"`
-	code        int        `json:"code"`
+	Code        int        `json:"code"`
 	Desc        string     `json:"desc"`
 	InputKey    string     `json:"inputKey"`
 	InputBucket string     `json:"inputBucket"`
@@ -62,28 +67,58 @@ type PfopStatus struct {
 func init() {
 	bytes, err := ioutil.ReadFile("key.json")
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		os.Exit(1)
 	}
 	json.Unmarshal(bytes, &keyPair)
-	fmt.Println(keyPair)
+	log.Println(keyPair)
+}
+
+func (a *CmdArgs) getPostBody() (body string) {
+	if a.Urlencode {
+		/*
+			body = "bucket=" + base64.URLEncoding.EncodeToString([]byte(a.Bucket)) +
+				"&key=" + base64.URLEncoding.EncodeToString([]byte(a.Key)) +
+				"&force=" + a.Force + "&fops=" + base64.URLEncoding.EncodeToString([]byte(a.Fops))
+		*/
+		body = "bucket=" + url.QueryEscape(a.Bucket) +
+			"&key=" + url.QueryEscape(a.Key) +
+			"&force=" + a.Force + "&fops=" + url.QueryEscape(a.Fops)
+		if a.Pipeline != "" {
+			body = body + "&pipeline=" + a.Pipeline
+		}
+		if a.NotifyURL != "" {
+			//body = body + "&notifyURL=" + base64.URLEncoding.EncodeToString([]byte(a.NotifyURL))
+			body = body + "&notifyURL=" + url.QueryEscape(a.NotifyURL)
+		}
+
+	} else {
+		body = "bucket=" + a.Bucket + "&key=" + a.Key + "&force=" + a.Force + "&fops=" + a.Fops
+		if a.Pipeline != "" {
+			body = body + "&pipeline=" + a.Pipeline
+		}
+		if a.NotifyURL != "" {
+			body = body + "&notifyURL=" + a.NotifyURL
+		}
+	}
+	return
 }
 
 //token的生成
 //http://developer.qiniu.com/article/developer/security/access-token.html
 func getPfopToken(path string, body string) (token string) {
-	fmt.Println("path:", path)
+	log.Println("path:", path)
 	key := []byte(keyPair.Sk)
 	mac := hmac.New(sha1.New, key)
 	mac.Write([]byte(path + "\n" + body))
-	fmt.Printf("%x\n", mac.Sum(nil))
+	log.Printf("%x\n", mac.Sum(nil))
 	//b64 := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	b64 := base64.URLEncoding.EncodeToString(mac.Sum(nil))
 
-	fmt.Println(b64)
+	log.Println(b64)
 	token = keyPair.Ak + ":" + b64
-	fmt.Println(" body:", body)
-	fmt.Println("token:", token)
+	log.Println(" body:", body)
+	log.Println("token:", token)
 	return
 }
 func post(url string, postStr string) []byte {
@@ -105,46 +140,34 @@ func post(url string, postStr string) []byte {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		fmt.Println(url, err)
-		return nil
+		log.Println(url, err)
+		if resp == nil {
+			log.Println("resp is nil")
+			return nil
+		}
 	}
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("fail to read resp body")
+		log.Println("fail to read resp body")
 		return nil
 	}
-	//fmt.Println(string(body))
+	//log.Println(string(body))
 	return body
 }
-func preparePost(a *CmdArgs, useUrlencode int) (res *PfopId) {
+func preparePost(a *CmdArgs) (res *PfopId) {
 	var b []byte
-	if useUrlencode == 0 {
-		//pfop只转义了/,所以不调用url.QueryEscape，调用会发生奇怪的错误，比如token
-		//有时对有时错，并且有些时候参数有问题
-		urlStr := "bucket=hikvision&force=1&fops=hkconv%2Fbucket%2FaGlrdmlzaW9u%2Fkey%2F" + base64.StdEncoding.EncodeToString([]byte(*a.Mp4file)) + "%2Fstart%2F" + strconv.Itoa(*a.Start) + "%2Fend%2F" + strconv.Itoa(*a.End) + "&key=2016-04-18.avi"
-		if *a.Queue != "" {
-			urlStr = "pipeline=" + (*a.Queue) + "&" + urlStr
-		}
-		fmt.Println(urlStr)
-		b = post("http://api.qiniu.com/pfop/", urlStr)
-	} else {
-		urlStr := "bucket=hikvision&force=1&fops=hkconv/bucket/aGlrdmlzaW9u/key/" + base64.StdEncoding.EncodeToString([]byte(*a.Mp4file)) + "/start/" + strconv.Itoa(*a.Start) + "/end/" + strconv.Itoa(*a.End) + "&key=2016-04-18.avi"
-		if *a.Queue != "" {
-			urlStr = "pipeline=" + (*a.Queue) + "&" + urlStr
-		}
-		fmt.Println(urlStr)
-		urlenc := url.QueryEscape(urlStr)
-		b = post("http://api.qiniu.com/pfop/", urlenc)
-	}
+	bstr := a.getPostBody()
+	//b = post("http://api.qiniu.com/pfop/",  url.QueryEscape(bstr))
+	b = post("http://api.qiniu.com/pfop/", bstr)
 
 	var fop PfopId
-	fmt.Println(string(b))
+	log.Println(string(b))
 	err := json.Unmarshal(b, &fop)
 	if err != nil {
-		fmt.Println("Unmarshal fail:", err)
+		log.Println("Unmarshal fail:", err)
 		return nil
 	}
 	res = &fop
@@ -154,96 +177,105 @@ func preparePost(a *CmdArgs, useUrlencode int) (res *PfopId) {
 func get(id string) (st *PfopStatus) {
 	resp, err := http.Get("http://api.qiniu.com/status/get/prefop?id=" + id)
 	if err != nil {
-		fmt.Println("http.Get fail:", err)
+		log.Println("http.Get fail:", err)
 		return nil
 	}
 
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return nil
 	}
-	//	fmt.Println(string(body))
+	//	log.Println(string(body))
 	var sts PfopStatus
 	err = json.Unmarshal(body, &sts)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return nil
 	}
 	st = &sts
 	return
 }
 func initArg(a *CmdArgs) {
-	a.End = flag.Int("end", 0, "must specified")
-	a.Start = flag.Int("start", 0, "must specified")
-	a.Queue = flag.String("queue", "", "specify dedicated queue")
-	a.Mp4file = flag.String("fname", "", "output mp4 file name")
-	a.Interval = flag.Int("interval", 0, "querty PersistentId interval. 0 mean not querty")
-	a.Times = flag.Int("times", 0, "querty PersistentId times")
-	a.Urlencode = flag.Int("urlencode", 0, "defualt, just encode /")
-	a.TokenOnly = flag.Int("tokenonly", 0, "just calculate token")
-	a.Body = flag.String("body", "", "use this to calculate token")
-	a.Path = flag.String("path", "", `use this to calculate token.
+	flag.StringVar(&a.Bucket, "bucket", "", "specify a bucket name")
+	flag.StringVar(&a.Key, "key", "", "specify a key name")
+	flag.StringVar(&a.Force, "force", "1", "ufop force")
+	flag.StringVar(&a.Fops, "fops", "", "ufop fops")
+	flag.StringVar(&a.NotifyURL, "notifyURL", "", "callback url")
+	flag.StringVar(&a.Pipeline, "pipeline", "", "specify dedicated queue")
+
+	flag.BoolVar(&a.PrintBody, "printBody", false, "defualt is false")
+	flag.BoolVar(&a.Urlencode, "urlencode", true, "defualt is true")
+
+	flag.IntVar(&a.Interval, "interval", 10, "querty PersistentId interval. 0 mean not querty")
+	flag.IntVar(&a.Times, "times", 5, "querty PersistentId times")
+
+	flag.BoolVar(&a.TokenOnly, "tokenonly", false, "just calculate token")
+	flag.StringVar(&a.Body, "body", "", "use this to calculate token")
+	flag.StringVar(&a.Path, "path", "", `use this to calculate token.
 	sample:
 	  path value:/move/bmV3ZG9jczpmaW5kX21hbi50eHQ=/bmV3ZG9jczpmaW5kLm1hbi50eHQ=
 	  ak: MY_ACCESS_KEY sk:MY_SECRET_KEY
 	  result:MY_ACCESS_KEY:FXsYh0wKHYPEsIAgdPD9OfjkeEM=
 	`)
 	flag.Parse()
-	fmt.Println("end     :", *a.End)
-	fmt.Println("start   :", *a.Start)
-	fmt.Println("interval:", *a.Interval)
-	fmt.Println("times   :", *a.Times)
-	fmt.Println("queue   :", *a.Queue)
-	fmt.Println("mp4file :", *a.Mp4file)
-	fmt.Println("urlenc  :", *a.Urlencode)
-	fmt.Println("path    :", *a.Path)
 }
 func checkArg(a *CmdArgs) {
-	if *a.TokenOnly != 0 {
-		if *a.Path == "" {
-			fmt.Println("must give path value")
+	if a.TokenOnly {
+		if a.Path == "" {
+			log.Println("must give path value")
 			os.Exit(1)
 		}
 		return
 	}
-	if *a.End < *a.Start {
-		fmt.Println("wrong start end")
-		os.Exit(2)
+	if a.Bucket == "" {
+		log.Println("must specify a bucket name use:-bucket")
+		os.Exit(1)
 	}
-	if *a.Mp4file == "" {
-		fmt.Println("fname must sepcified")
-		os.Exit(2)
+	if a.Key == "" {
+		log.Println("must specify a key(file) name use:-key")
+		os.Exit(1)
 	}
-
+	if a.Fops == "" {
+		log.Println("must specify fops(cmd) use:-fops")
+		os.Exit(1)
+	}
 }
+
 func main() {
 	//post("http://api.qiniu.com/pfop/", "pipeline=jjj&bucket=hikvision&force=1&fops=hkconv%2Fbucket%2FaGlrdmlzaW9uYQ%3D%3D%2Fkey%2FaGlraW5nMTA0ODU3Ni5tcDQ%3D%2Fstart%2F1048576%2Fend%2F2379776&key=2016-04-18.avi")
+
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	var arg CmdArgs
 	initArg(&arg)
 	checkArg(&arg)
-	if *arg.TokenOnly != 0 {
-		getPfopToken(*arg.Path, *arg.Body)
+
+	if arg.TokenOnly {
+		getPfopToken(arg.Path, arg.Body)
+		return
+	}
+	if arg.PrintBody {
+		log.Println(arg.getPostBody())
 		return
 	}
 
-	id := preparePost(&arg, *arg.Urlencode)
+	id := preparePost(&arg)
 	if id == nil {
-		fmt.Println("preparePost fail")
+		log.Println("preparePost fail")
 		return
 	}
 	if id.PersistentId == "" {
-		fmt.Println(id.Error)
+		log.Println(id.Error)
 		return
 	}
 
-	fmt.Println(id.PersistentId)
-	if *arg.Interval > 0 && *arg.Times > 0 {
-		for i := 0; i < *arg.Times; i++ {
+	log.Println(id.PersistentId)
+	if arg.Interval > 0 && arg.Times > 0 {
+		for i := 0; i < arg.Times; i++ {
 			st := get(id.PersistentId)
-			fmt.Println(st.Desc)
-			time.Sleep(time.Second * (time.Duration(*arg.Interval)))
+			log.Println(st.Desc)
+			time.Sleep(time.Second * (time.Duration(arg.Interval)))
 		}
 	}
 }
